@@ -43,7 +43,7 @@ class $modify(NLWInfoLayer, LevelInfoLayer) {
 	void updateDifficultyFace() {
 		if (!ListManager::fetchedRatings || ListManager::erroredRatings) return;
 		if (this->m_level->m_stars != 10) return;
-		if (this->m_level->m_demonDifficulty != 6) return; // extreme demob
+		if (this->m_level->m_demonDifficulty != 6) return; // extreme demon
 
 		if (m_fields->m_menu == nullptr) return;
 
@@ -61,30 +61,26 @@ class $modify(NLWInfoLayer, LevelInfoLayer) {
 		}
 
 		if (Mod::get()->getSettingValue<bool>("use-demon-face")) {
-			// a little uglier than i'd like but it's ok
-			// :normal:
-
-			this->m_fields->m_menu->removeAllChildren(); // might result in a slow creeping memory leak..
-
+			this->m_fields->m_menu->removeAllChildren();
 			this->m_fields->m_menu->setPosition(m_difficultySprite->getPosition());
 
 			auto sprite = GJDifficultySprite::create(m_level->m_demonDifficulty + 4, static_cast<GJDifficultyName>(1));
-			//sprite->updateFeatureStateFromLevel(m_level);
-			//sprite->updateFeatureState(m_level->m_featured);
-
 			auto button = CCMenuItemSpriteExtra::create(
 				sprite, this, menu_selector(NLWInfoLayer::openNLWInfoPane)
 			);
 			this->m_fields->m_menu->addChild(button);
-
 			m_difficultySprite->setVisible(false);
 		} else {
 			if (this->m_fields->m_addedTier) return;
+
 			this->m_fields->m_menu->setPosition({ m_difficultySprite->getPositionX(), m_difficultySprite->getPositionY() + 35 });
 
 			auto label = CCLabelBMFont::create(rating->format().c_str(), "bigFont.fnt");
 			label->setScale(0.5f);
-			label->setColor(rating->type == NLWRatingType::Pending ? cocos2d::ccColor3B(255, 255, 255) : ListManager::getTierColor(rating->tier));
+			label->setColor(rating->type == NLWRatingType::Pending
+				? cocos2d::ccColor3B{255, 255, 255}
+				: ListManager::getTierColor(rating->tier)
+			);
 			auto tier = CCMenuItemSpriteExtra::create(
 				label, this, menu_selector(NLWInfoLayer::openNLWInfoPane)
 			);
