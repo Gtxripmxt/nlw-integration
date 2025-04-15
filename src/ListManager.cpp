@@ -9,6 +9,7 @@
 #include <matjson.hpp>
 #include <optional>
 #include <string>
+#include <algorithm>
 
 using namespace geode::prelude;
 
@@ -22,30 +23,36 @@ EventListener<web::WebTask> ListManager::fetchListListener;
 void ListManager::parseResponse(matjson::Value data) {
 	if (!data.isArray()) {
 		log::error("got unexpected data: {}", data.dump());
-		ListManager::throwError("expected root element to be an array! check logs");
+		ListManager::throwError("Expected root element to be a JSON array. Check logs.");
 		return;
 	}
 
-	auto arr = data.asArray().unwrap();
+	auto arrOpt = data.asArray();
+	if (!arrOpt.has_value()) {
+		log::error("JSON value couldn't be converted to array: {}", data.dump());
+		ListManager::throwError("Malformed JSON data.");
+		return;
+	}
 
-	for (auto& level : arr) {
+	auto arr = arrOpt.value();
+
+	for (const auto& level : arr) {
 		auto rating = NLWRating(level);
 		ListManager::ratings.push_back(rating);
 	}
 }
 
-// https://www.winehq.org/pipermail/wine-devel/2008-September/069387.html
 std::string getWineVersion() {
-	#ifdef GEODE_IS_WINDOWS
-		static const char * (CDECL *pwine_get_version)(void);
-		HMODULE hntdll = GetModuleHandle("ntdll.dll");
-		if (!hntdll) return "";
-		pwine_get_version = (const char *(__cdecl *)(void))GetProcAddress(hntdll, "wine_get_version");
-		if (pwine_get_version) return fmt::format(" (Wine/{})", pwine_get_version());
-		return "";
-	#else
-		return "";
-	#endif
+#ifdef GEODE_IS_WINDOWS
+	static const char* (CDECL* pwine_get_version)(void);
+	HMODULE hntdll = GetModuleHandle("ntdll.dll");
+	if (!hntdll) return "";
+	pwine_get_version = (const char* (__cdecl*)(void))GetProcAddress(hntdll, "wine_get_version");
+	if (pwine_get_version) return fmt::format(" (Wine/{})", pwine_get_version());
+	return "";
+#else
+	return "";
+#endif
 }
 
 std::string getPlatformName() {
@@ -63,27 +70,29 @@ std::string getUserAgent() {
 }
 
 void ListManager::init() {
-	ListManager::fetchListListener.bind([] (web::WebTask::Event* e) {
-    if (web::WebResponse* res = e->getValue()) {
+	ListManager::fetchListListener.bind([](web::WebTask::Event* e) {
+		if (web::WebResponse* res = e->getValue()) {
 			auto json = res->json();
 			if (res->ok() && json.isOk()) {
 				ListManager::fetchedRatings = true;
 				ListManager::erroredRatings = false;
 				ListManager::parseResponse(json.unwrap());
-				log::info("successfully fetched {} levels", ListManager::ratings.size());
-			} else {
+				log::info("Successfully fetched {} levels", ListManager::ratings.size());
+			}
+			else {
 				ListManager::throwError(fmt::format("{}: {}", res->code(), res->string().unwrapOr("No data returned")));
 			}
-    } else if (web::WebProgress* progress = e->getProgress()) {
-			// The request is still in progress...
-    } else if (e->isCancelled()) {
-			log::info("request cancelled?");
-    }
+		}
+		else if (web::WebProgress* progress = e->getProgress()) {
+			// Still in progress...
+		}
+		else if (e->isCancelled()) {
+			log::info("Request cancelled");
+		}
 	});
 
 	if (!ListManager::fetchedRatings) {
-		web::WebRequest req = web::WebRequest();
-
+		web::WebRequest req;
 		req.userAgent(getUserAgent());
 		auto task = req.get(NLW_API_URL);
 
@@ -94,21 +103,21 @@ void ListManager::init() {
 void ListManager::throwError(std::string message) {
 	ListManager::fetchedRatings = true;
 	ListManager::erroredRatings = true;
-	std::string errorStr = "\n\n<cr>Could not fetch NLW data.</c>\nThe API could be down, or this is could be a temporary network failure. Restart your game to try again!";
+	std::string errorStr = "\n\n<cr>Could not fetch NLW data.</c>\nThe API could be down, or this could be a temporary network failure. Restart your game to try again!";
 	FLAlertLayer::create("Error", message + errorStr, "OK")->show();
-	log::error("error fetching ratings: {}", message);
+	log::error("Error fetching ratings: {}", message);
 }
 
 std::string lowercase(std::string data) {
 	std::transform(data.begin(), data.end(), data.begin(),
-		[](unsigned char c){ return std::tolower(c); });
+		[](unsigned char c) { return std::tolower(c); });
 	return data;
 }
 
 std::optional<NLWRating> ListManager::getRating(GJGameLevel* level) {
 	auto id = level->m_levelID.value();
 
-	for (auto rating : ListManager::ratings) {
+	for (const auto& rating : ListManager::ratings) {
 		if (id == rating.id) {
 			return rating;
 		}
@@ -118,27 +127,25 @@ std::optional<NLWRating> ListManager::getRating(GJGameLevel* level) {
 }
 
 cocos2d::ccColor3B ListManager::getTierColor(std::string tier) {
-	// regular tiers
-	if (tier == "Fuck")          return cocos2d::ccColor3B(0,   0,   0  );
-	if (tier == "Beginner")      return cocos2d::ccColor3B(58,  134, 228);
-	if (tier == "Easy")          return cocos2d::ccColor3B(0,   255, 254);
-	if (tier == "Medium")        return cocos2d::ccColor3B(0,   255, 55 );
-	if (tier == "Hard")          return cocos2d::ccColor3B(255, 255, 63 );
-	if (tier == "Very Hard")     return cocos2d::ccColor3B(255, 153, 43 );
-	if (tier == "Insane")        return cocos2d::ccColor3B(255, 3,   28 );
-	if (tier == "Extreme")       return cocos2d::ccColor3B(255, 12,  251);
-	if (tier == "Remorseless")   return cocos2d::ccColor3B(157, 10,  250);
+	if (tier == "Fuck")          return cocos2d::ccColor3B(0, 0, 0);
+	if (tier == "Beginner")      return cocos2d::ccColor3B(58, 134, 228);
+	if (tier == "Easy")          return cocos2d::ccColor3B(0, 255, 254);
+	if (tier == "Medium")        return cocos2d::ccColor3B(0, 255, 55);
+	if (tier == "Hard")          return cocos2d::ccColor3B(255, 255, 63);
+	if (tier == "Very Hard")     return cocos2d::ccColor3B(255, 153, 43);
+	if (tier == "Insane")        return cocos2d::ccColor3B(255, 3, 28);
+	if (tier == "Extreme")       return cocos2d::ccColor3B(255, 12, 251);
+	if (tier == "Remorseless")   return cocos2d::ccColor3B(157, 10, 250);
 	if (tier == "Relentless")    return cocos2d::ccColor3B(178, 135, 232);
 	if (tier == "Terrifying")    return cocos2d::ccColor3B(241, 158, 234);
-	if (tier == "Catastrophic")  return cocos2d::ccColor3B(234, 102, 97 );
+	if (tier == "Catastrophic")  return cocos2d::ccColor3B(234, 102, 97);
 	if (tier == "Super Fucking Terrifying") return cocos2d::ccColor3B(0, 0, 0);
 
-	// pending
-	if (tier == "Low End")            return cocos2d::ccColor3B(0,   192, 237);
-	if (tier == "Low-Mid Range")      return cocos2d::ccColor3B(0,   255, 135);
-	if (tier == "Mid Range")          return cocos2d::ccColor3B(255, 204, 52 );
-	if (tier == "Mid-High Range")     return cocos2d::ccColor3B(255, 5,   128);
-	if (tier == "High End")           return cocos2d::ccColor3B(167, 93,  242);
+	if (tier == "Low End")            return cocos2d::ccColor3B(0, 192, 237);
+	if (tier == "Low-Mid Range")      return cocos2d::ccColor3B(0, 255, 135);
+	if (tier == "Mid Range")          return cocos2d::ccColor3B(255, 204, 52);
+	if (tier == "Mid-High Range")     return cocos2d::ccColor3B(255, 5, 128);
+	if (tier == "High End")           return cocos2d::ccColor3B(167, 93, 242);
 	if (tier == "Unknown")            return cocos2d::ccColor3B(255, 255, 255);
 	if (tier == "New Rates")          return cocos2d::ccColor3B(255, 255, 255);
 	if (tier == "Potential Extremes") return cocos2d::ccColor3B(235, 235, 235);
@@ -147,18 +154,19 @@ cocos2d::ccColor3B ListManager::getTierColor(std::string tier) {
 }
 
 cocos2d::ccColor3B ListManager::getEnjoymentColor(float enjoyment) {
-	if (enjoyment > 90.f) return cocos2d::ccColor3B(0,   255, 254);
+	if (enjoyment > 90.f) return cocos2d::ccColor3B(0, 255, 254);
 	if (enjoyment > 75.f) return cocos2d::ccColor3B(179, 215, 170);
 	if (enjoyment > 60.f) return cocos2d::ccColor3B(255, 229, 159);
 	if (enjoyment > 40.f) return cocos2d::ccColor3B(254, 203, 160);
-	if (enjoyment >  0.f) return cocos2d::ccColor3B(240, 153, 154);
+	if (enjoyment > 0.f)  return cocos2d::ccColor3B(240, 153, 154);
 	return cocos2d::ccColor3B(255, 255, 255);
 }
 
 std::string ListManager::getRatingLink(NLWRating rating) {
 	int sheetID = 0;
 	if (rating.type == NLWRatingType::Platformer) sheetID = 339121001;
-	if (rating.type == NLWRatingType::Pending) sheetID = 1134134033;
+	else if (rating.type == NLWRatingType::Pending) sheetID = 1134134033;
+	else log::warn("Unknown rating type for ID {}", rating.id);
 
 	auto rowID = std::to_string(rating.sheetIndex + 1);
 	std::string range = rowID + ":" + rowID;
@@ -169,19 +177,11 @@ std::string ListManager::getRatingLink(NLWRating rating) {
 GJSearchObject* ListManager::getSearchObject(std::string tier) {
 	std::stringstream download;
 	bool first = true;
-	for (auto rating : ListManager::ratings) {
+
+	for (const auto& rating : ListManager::ratings) {
 		if (rating.tier != tier) continue;
 
 		if (!first) {
 			download << ",";
 		}
 		download << rating.id;
-		first = false;
-	}
-
-	log::info("download str {}", download.str());
-	
-	download << "&gameVersion=22";
-	GJSearchObject* searchObj = GJSearchObject::create(SearchType::Type19, download.str());
-	return searchObj;
-}   
